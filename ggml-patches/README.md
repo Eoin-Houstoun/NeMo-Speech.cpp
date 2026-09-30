@@ -117,7 +117,10 @@ stock comparison therefore requires both a pristine ggml checkout and
 - **0014-cuda-fused-attention-extensions.patch** - generalizes fused attention
   to standard and relative-position modes, persistent circular K/V caches,
   active-length state, streaming FastConformer shapes, and Magpie's cached
-  single-query shape.
+  single-query shape. The `q_len == 1`, `d_k == 64` cached kernel splits the
+  key range across blocks (about 96 keys per block, up to 8 blocks per head)
+  with a last-arriving-block merge, so an autoregressive decoder step uses
+  several SMs per head instead of one.
 
 - **0015-cuda-ctc-batch-fusions.patch** - adds BatchNorm, transpose/SiLU,
   affine LayerNorm, and cached-F16 projection epilogues used by batched
@@ -127,7 +130,10 @@ stock comparison therefore requires both a pristine ggml checkout and
   axes after flattened Conv1D matrix multiplication.
 
 - **0017-cuda-stream-interop.patch** - exposes borrowed access to the active
-  CUDA stream and stable graph templates for external graph composition.
+  CUDA stream and stable graph templates for external graph composition, and
+  adds `ggml_backend_cuda_set_stream_priority()` so a latency-critical backend
+  (the MagpieTTS decoder) can run its streams at a higher CUDA stream priority
+  than a concurrent worker backend (the NanoCodec vocoder).
 
 - **0018-metal-tensor-api-dynamic-k.patch** - backports upstream ggml `33c9ea5`
   (llama/27450), which stops the Metal tensor-API matmul reading `src1` out of
@@ -176,6 +182,54 @@ stock comparison therefore requires both a pristine ggml checkout and
   and any planes they own, when their CUDA weight buffer is freed or cleared.
   The cache was keyed only by device address, so weights later allocated at a
   reused address were treated as already repacked.
+
+- **0024-cuda-im2col-1d-tiled.patch** - a tiled, coalesced fast path for 1D
+  `im2col` (`IH == KH == OH == 1`) that stages a channel-by-time input tile
+  through shared memory and writes consecutive output rows with consecutive
+  threads; the generic kernel strides across channels and re-reads every input
+  `KW` times. Layered on 0020, which also edits `im2col.cu`.
+
+- **0025-cuda-conv1d-fused.patch** - adds the `ggml_conv1d_fused` and
+  `ggml_conv1d_fused_grouped` ops: a causal 1D convolution over an F32
+  streaming-cache prefix plus the current input, with the snake/leaky-ReLU
+  activation applied on load, computed as an implicit GEMM with `mma.sync`
+  tensor-core fragments (F16 operands, F32 accumulation, split-K, fused bias and
+  residual epilogue) from F16 weights pre-packed as `[K][cout][cin]`. The
+  grouped form runs several kernel-size branches in one launch. CUDA only: the
+  op is reported supported only for NVIDIA devices with sm_80+ device code in
+  the build, the CPU backend reports it unsupported, and other backends reject
+  it, so callers keep their unfused path. Replaces the im2col + cuBLAS
+  decomposition in the NanoCodec decoder.
+
+- **0026-cuda-backend-graphs-toggle.patch** - adds
+  `ggml_backend_cuda_set_graphs_enabled()`: a per-backend opt-out of CUDA graph
+  capture/replay for backends that compute one-shot graphs (capture and
+  instantiate hold the driver lock and stall launches on other threads).
+- **0027-cuda-block-reduce-barrier.patch** - `block_reduce()` synchronizes the
+  block before writing its shared-memory slot: consecutive reductions on the same
+  buffer (soft_max: max then sum) otherwise race and give scheduling-dependent
+  results when the SM is shared with a co-resident kernel.
+
+- **0028-cuda-conv1d-preactivation.patch** - for grouped `ggml_conv1d_fused`
+  problems with several output-channel tiles, activates and packs the input once
+  per element into an F16 buffer instead of once per tile, then runs the
+  convolution on the packed input. Results are bit-identical; the NanoCodec
+  decoder runs about twice as fast.
+
+- **0029-cuda-skinny-q8-history-independent-dispatch.patch** - skinny-Q8
+  dispatch depends only on the column count (N <= 8: MMVQ, planar after a
+  repack; wider: skinny-Q8), not on whether an earlier call repacked the
+  weight, so outputs no longer depend on previously served requests. Removes
+  `GGML_SKINNY_Q8_OUTER_BATCH`.
+
+- **0030-cpu-fp16-conversion-im2col.patch** - on x86 with F16C, scalar
+  FP32 -> FP16 conversions use `vcvtps2ph` instead of the portable
+  bit-manipulating routine, and `im2col` splits threads by output row instead
+  of interleaved channels, so threads no longer write interleaved segments of
+  the same output rows. The conversion matches the portable routine for every
+  non-NaN FP32 input (checked exhaustively; NaN payloads may differ), and
+  `im2col` computes the same values in a different thread order. Both speed up
+  F16 convolutions such as the NanoCodec decoder on CPU.
 
 ## Regenerating after editing ggml
 
