@@ -17,6 +17,21 @@ endforeach()
 if(NOT NEMO_SPEECH_VERSION OR NOT NEMO_SPEECH_PROJECT_VERSION)
     message(FATAL_ERROR "could not parse NEMO_SPEECH_VERSION from ${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 endif()
+# Semver build metadata for the reported version, e.g. nightly.<sha> for
+# nightly release builds, which then report 0.2.0+nightly.<sha>.
+set(NEMO_SPEECH_VERSION_METADATA "" CACHE STRING
+    "Build metadata appended to the reported version (dot-separated [0-9A-Za-z-] identifiers)")
+if(NEMO_SPEECH_VERSION_METADATA)
+    if(NOT NEMO_SPEECH_VERSION_METADATA MATCHES "^[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*$")
+        message(FATAL_ERROR
+            "NEMO_SPEECH_VERSION_METADATA must be dot-separated [0-9A-Za-z-] identifiers")
+    endif()
+    if(NEMO_SPEECH_VERSION MATCHES "\\+")
+        string(APPEND NEMO_SPEECH_VERSION ".${NEMO_SPEECH_VERSION_METADATA}")
+    else()
+        string(APPEND NEMO_SPEECH_VERSION "+${NEMO_SPEECH_VERSION_METADATA}")
+    endif()
+endif()
 
 project(nemo_speech VERSION ${NEMO_SPEECH_PROJECT_VERSION} LANGUAGES C CXX)
 add_compile_definitions(NEMO_SPEECH_VERSION_STR="${NEMO_SPEECH_VERSION}")
@@ -24,7 +39,12 @@ add_compile_definitions(NEMO_SPEECH_VERSION_STR="${NEMO_SPEECH_VERSION}")
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 if(WIN32)
-    # Install the Visual C++ runtime required by Windows packages.
+    # Install the Visual C++ runtime required by Windows packages, plus the
+    # OpenMP runtime (vcomp140.dll) that ggml's CPU threading links against
+    # unless GGML_OPENMP is OFF.
+    if(NOT DEFINED GGML_OPENMP OR GGML_OPENMP)
+        set(CMAKE_INSTALL_OPENMP_LIBRARIES TRUE)
+    endif()
     include(InstallRequiredSystemLibraries)
 endif()
 set(NEMO_SPEECH_LICENSE_INSTALL_DIR

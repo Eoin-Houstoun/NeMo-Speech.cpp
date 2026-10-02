@@ -160,7 +160,7 @@ The command-line microphone capture layer compiles miniaudio directly into
 ### SentencePiece
 
 - Source: [`google/sentencepiece`](https://github.com/google/sentencepiece),
-  revision `17d7580d6407802f85855d2cc9190634e2c95624`
+  revision `31646a467d2051eb904e0b45de3a73e91fe1c1e3`
 - Copyright 2018 Google Inc.
 - License: Apache License 2.0
 
@@ -168,6 +168,27 @@ Default Windows ASR, macOS, and Linux release builds statically link the
 SentencePiece runtime and its bundled Abseil, protobuf-lite, and Darts-clone
 components. Their Apache 2.0 and BSD license texts are installed under
 `share/licenses/nemo-speech/third_party/sentencepiece/`.
+
+### Text normalization runtime
+
+`scripts/build_itn_deps.sh` builds these pinned sources for ITN and TN:
+
+- OpenFST: [`sarane22/openfst`](https://github.com/sarane22/openfst), revision
+  `fc23b4cf529429284b874a26f28b15c6cc94f404`; Copyright 2005-2024 Google LLC;
+  Apache License 2.0
+- Sparrowhawk: [`sarane22/sparrowhawk`](https://github.com/sarane22/sparrowhawk),
+  revision `8b082acc507312077a096be8398584a13832c490`; Copyright 2015 and
+  onwards Google, Inc.; Apache License 2.0
+- Protocol Buffers:
+  [`protocolbuffers/protobuf`](https://github.com/protocolbuffers/protobuf)
+  v21.12; Copyright 2008 Google Inc.; BSD 3-Clause License
+- RE2: [`google/re2`](https://github.com/google/re2) 2023-03-01; Copyright (c)
+  2009 The RE2 Authors; BSD 3-Clause License
+
+Linux and macOS release archives statically link all four into
+`libnemo_speech_text_normalization`. Builds that use system Protocol Buffers and
+RE2 link those instead. The license texts are installed under
+`share/licenses/nemo-speech/third_party/`.
 
 ### whisper.cpp sample audio
 
