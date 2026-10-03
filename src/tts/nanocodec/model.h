@@ -124,4 +124,7 @@ class NanoCodecDecoder {
     const NanoCodecModel* model_;
 };
 
+// True when every sample is finite (no NaN or infinity).
+bool is_finite_audio(const std::vector<float>& audio);
+
 }  // namespace nemo_speech::tts::nanocodec
