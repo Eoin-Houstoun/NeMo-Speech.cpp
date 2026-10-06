@@ -510,7 +510,6 @@ MelSpectrogramExtractor::compute_padded(
 
     std::vector<float> re(n_fft_, 0.0f);
     std::vector<float> im(n_fft_, 0.0f);
-    std::vector<float> power(n_bins, 0.0f);
 
     for (int f = 0; f < n_frames; f++) {
         const int offset = f * hop;
@@ -527,7 +526,9 @@ MelSpectrogramExtractor::compute_padded(
 
         fft_radix2_inplace(fft_swaps_, fft_tw_re_, fft_tw_im_, re, im);
 
-        // Power spectrum (once per frame) -> mel
+        // Power spectrum (once per frame, in place in re) -> mel. re is
+        // refilled at the start of every frame, so it can hold the power here.
+        float* power = re.data();
         for (int k = 0; k < n_bins; k++) power[k] = re[k] * re[k] + im[k] * im[k];
         for (int m = 0; m < cfg_.n_mels; m++) {
             const float* row = mel_basis_.data() + static_cast<size_t>(m) * n_bins;
