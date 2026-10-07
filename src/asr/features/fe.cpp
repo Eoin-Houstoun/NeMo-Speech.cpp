@@ -533,7 +533,13 @@ MelSpectrogramExtractor::compute_padded(
         for (int m = 0; m < cfg_.n_mels; m++) {
             const float* row = mel_basis_.data() + static_cast<size_t>(m) * n_bins;
             float acc = 0.0f;
-            for (int k = mel_kbeg_[m]; k < mel_kend_[m]; k++) acc += row[k] * power[k];
+            // Separate statements so clang does not fuse the multiply-add (it
+            // contracts only within one expression); fused, the sum would differ
+            // from the dense product in the last bit on arm64.
+            for (int k = mel_kbeg_[m]; k < mel_kend_[m]; k++) {
+                const float term = row[k] * power[k];
+                acc += term;
+            }
             features[static_cast<size_t>(m) + static_cast<size_t>(f) * cfg_.n_mels] =
                 std::log(acc + cfg_.log_zero_guard);
         }

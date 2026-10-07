@@ -1,20 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-// The CPU log-mel path must match a plain reference: an FFT with its twiddles
-// computed inline and a dense filterbank product. Covers the generated
-// filterbank and one set with set_mel_basis, including rows the sparse span has
-// to handle at its edges. The tolerance only absorbs fused multiply-adds, which
-// a compiler may form differently in this file and in the library.
+// The CPU log-mel path must give the same bits as a plain reference: an FFT
+// with its twiddles computed inline and a dense filterbank product. Covers the
+// generated filterbank and one set with set_mel_basis, including rows the
+// sparse span has to handle at its edges.
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <stdexcept>
 #include <vector>
 
 #include "fe.h"
-#include "numeric_parity.h"
 
 namespace {
 
@@ -114,7 +113,8 @@ reference_log_mel(
             float acc = 0.0f;
             for (int k = 0; k < n_bins; k++) {
                 const float power = re[k] * re[k] + im[k] * im[k];
-                acc += basis[static_cast<size_t>(m) * n_bins + k] * power;
+                const float term = basis[static_cast<size_t>(m) * n_bins + k] * power;
+                acc += term;  // unfused, as in the library
             }
             features[static_cast<size_t>(m) + static_cast<size_t>(f) * cfg.n_mels] =
                 std::log(acc + cfg.log_zero_guard);
@@ -123,7 +123,10 @@ reference_log_mel(
     return features;
 }
 
-constexpr float kTolerance = 1e-5f;
+bool
+same_bits(const std::vector<float>& a, const std::vector<float>& b) {
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
 
 std::vector<float>
 noise(size_t n, unsigned seed) {
@@ -142,9 +145,8 @@ check_config(const MelSpecConfig& cfg, const char* name) {
     int n_frames = 0;
 
     fe.compute(audio.data(), audio.size(), features, n_frames, true, false);
-    float diff = finite_max_abs_diff(features, reference_log_mel(cfg, generated_basis(cfg), audio));
-    if (!(diff <= kTolerance)) {
-        std::fprintf(stderr, "[FAIL] %s: generated filterbank off by %g\n", name, diff);
+    if (!same_bits(features, reference_log_mel(cfg, generated_basis(cfg), audio))) {
+        std::fprintf(stderr, "[FAIL] %s: generated filterbank differs from the reference\n", name);
         throw std::runtime_error("mel features: generated filterbank");
     }
 
@@ -159,9 +161,8 @@ check_config(const MelSpecConfig& cfg, const char* name) {
     basis[3 * static_cast<size_t>(n_bins) + n_bins / 2] = 0.5f;  // with a gap in between
     fe.set_mel_basis(basis.data(), cfg.n_mels, n_bins);
     fe.compute(audio.data(), audio.size(), features, n_frames, true, false);
-    diff = finite_max_abs_diff(features, reference_log_mel(cfg, basis, audio));
-    if (!(diff <= kTolerance)) {
-        std::fprintf(stderr, "[FAIL] %s: set_mel_basis output off by %g\n", name, diff);
+    if (!same_bits(features, reference_log_mel(cfg, basis, audio))) {
+        std::fprintf(stderr, "[FAIL] %s: set_mel_basis output differs from the reference\n", name);
         throw std::runtime_error("mel features: set_mel_basis");
     }
 }
@@ -186,6 +187,6 @@ main() {
     wide.fmax = 7600.0f;
     check_config(wide, "n_fft 1024");
 
-    std::printf("[PASS] CPU log-mel matches the reference\n");
+    std::printf("[PASS] CPU log-mel matches the reference bit for bit\n");
     return 0;
 }
